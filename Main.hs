@@ -6,6 +6,7 @@ module Main where
 
 import Prelude hiding (FilePath)
 
+import Control.Concurrent
 import Control.Concurrent.MVar
 import Control.Concurrent.Async
 
@@ -35,6 +36,9 @@ type JobMap      = M.Map String (Sh ())
 type JobDepends  = (JobTag, JobTag, ())
 type JobTagGraph = Gr String ()
 type JobGraph    = Gr Job ()
+
+getNumCapabilitiesSh :: Sh T.Text
+getNumCapabilitiesSh = liftIO getNumCapabilities >>= (\n -> return $ T.pack $ show n)
 
 newMVarSh :: a -> Sh (MVar a)
 newMVarSh = liftIO . newMVar
@@ -93,6 +97,9 @@ runJobGraph m g = do
     let js = nodes g'
     mapM_ (runJob g') js
     mapM_ blockOn $ map (fromJust . lab g') js
+
+runlocal_ :: FilePath -> [T.Text] -> Sh ()
+runlocal_ c as = pwd >>= (\cp -> run_ (cp </> c) as)
 
 -- Static relative paths to executables:
 
@@ -168,12 +175,12 @@ zmq_dir = "zeromq-4.0.5"
 zmq_tar = zmq_dir `T.append` ".tar.gz"
 zmq_path = "http://download.zeromq.org/" `T.append` zmq_tar
 
-ghc_link1_dir = "ghc-7.4.1-src"
-ghc_link1_tar = ghc_link1_dir `T.append` ".tar.bz2"
+ghc_link1_dir = "ghc-7.4.1"
+ghc_link1_tar = ghc_link1_dir `T.append` "-src.tar.bz2"
 ghc_link1_path = "http://www.haskell.org/ghc/dist/7.4.1/" `T.append` ghc_link1_tar
 
-ghc_link2_dir = "ghc-7.8.4-src"
-ghc_link2_tar = ghc_link2_dir `T.append` ".tar.bz2"
+ghc_link2_dir = "ghc-7.8.4"
+ghc_link2_tar = ghc_link2_dir `T.append` "-src.tar.bz2"
 ghc_link2_path = "http://www.haskell.org/ghc/dist/7.8.4/" `T.append` ghc_link2_tar
 
 -- List of all RPMs we're going to need:
@@ -349,69 +356,79 @@ initYum = do
 -- These installations must share an Sh environment
 raptorRasqalFstoreInstall :: Sh ()
 raptorRasqalFstoreInstall = do
+    cores <- getNumCapabilitiesSh
+    let mj = "-j" `T.append` cores
     appendfile ld_local_path "/usr/local/lib\n/usr/local/lib64\n"
     run_ ldconfig_path []
     setenv pkg_config_var pkg_config_val
     cd "/app/src/pkg/raptor"
     run_ tar_path ["xvzf", raptor_tar]
     cd $ fromText raptor_dir
-    run_ "./configure" []
-    run_ make_path []
+    runlocal_ "configure" []
+    run_ make_path [mj]
     run_ make_path ["install"]
     run_ ldconfig_path []
     cd "/app/src/pkg/rasqal"
     run_ tar_path ["xvzf", rasqal_tar]
     cd $ fromText rasqal_dir
-    run_ "./configure" []
-    run_ make_path []
+    runlocal_ "configure" []
+    run_ make_path [mj]
     run_ make_path ["install"]
     run_ ldconfig_path []
     cd "/app/src/pkg/4store"
     run_ tar_path ["xvzf", fstore_tar]
     cd $ fromText fstore_dir
-    run_ "./configure" ["--with-storage-path=/app/4s-data"]
-    run_ make_path []
+    runlocal_ "configure" ["--with-storage-path=/app/4s-data"]
+    run_ make_path [mj]
     run_ make_path ["install"]
     run_ ldconfig_path []
 
 hdf5Install :: Sh ()
 hdf5Install = do
+    cores <- getNumCapabilitiesSh
+    let mj = "-j" `T.append` cores
     cd "/app/src/pkg/hdf5"
     run_ tar_path ["xvzf", hdf5_tar]
     cd $ fromText hdf5_dir
-    run_ "./configure" ["--prefix=/usr/local"]
-    run_ make_path []
+    runlocal_ "configure" ["--prefix=/usr/local"]
+    run_ make_path [mj]
     run_ make_path ["install"]
     run_ ldconfig_path []
 
 zmqInstall :: Sh ()
 zmqInstall = do
+    cores <- getNumCapabilitiesSh
+    let mj = "-j" `T.append` cores
     cd "/app/src/pkg/zmq"
     run_ tar_path ["xvzf", zmq_tar]
     cd $ fromText zmq_dir
-    run_ "./configure" []
-    run_ make_path []
+    runlocal_ "configure" []
+    run_ make_path [mj]
     run_ make_path ["install"]
     run_ ldconfig_path []
 
 ghcLink1 :: Sh ()
 ghcLink1 = do
+    cores <- getNumCapabilitiesSh
+    let mj = "-j" `T.append` cores
     cd "/app/src/pkg/ghc_bootstrap"
     run_ tar_path ["xvjf", ghc_link1_tar]
     cd $ fromText ghc_link1_dir
     run_ perl_path ["boot"]
-    run_ "./configure" []
-    run_ make_path []
+    runlocal_ "configure" []
+    run_ make_path [mj]
     run_ make_path ["install"]
 
 ghcLink2 :: Sh ()
 ghcLink2 = do
+    cores <- getNumCapabilitiesSh
+    let mj = "-j" `T.append` cores
     cd "/app/src/pkg/ghc_bootstrap"
     run_ tar_path ["xvjf", ghc_link2_tar]
     cd $ fromText ghc_link2_dir
     run_ perl_path ["boot"]
-    run_ "./configure" []
-    run_ make_path []
+    runlocal_ "configure" []
+    run_ make_path [mj]
     run_ make_path ["install"]
 
 depmap = M.fromList [
@@ -468,7 +485,7 @@ preflight = liftM catMaybes checks
 --           ,test_f ld_local_path >>= (\e -> return $ if e then Nothing else Just $ "/etc/ld.so.conf.d/local.conf not found.")
            ]
 
-main = shelly $ do
+main = (shelly . silently) $ do
     echo_n "Performing pre-flight check... "
     preflight >>= \case [] -> echo "Success."
                         es -> echo "Failure." >> echo (T.intercalate "\n" es) >> quietExit 1
