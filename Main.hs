@@ -250,13 +250,7 @@ initPKUtree = mkdirTree tree
     where (#)    = Node
           tree = "/app" # [
             "Analytics" # []
-           ,"Datablocks" # [
-                "jnj28431754" # []
-               ,"jnj38969216_remicade_c168" # []
-               ,"jnj54767414_dara" # []
-               ,"jnj56021927_gainer" # []
-               ,"jnj56022473_castle" # []
-               ]
+           ,"Datablocks" # []
            ,"sandboxes" # []
            ,"schema_files" # []
            ,"source_systems" # [
